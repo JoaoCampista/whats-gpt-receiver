@@ -1,6 +1,14 @@
 import pika
 import os
 import time
+from os.path import join, dirname
+from dotenv import load_dotenv
+from openai_api import *
+from whatsapp_api import *
+
+
+dotenv_path = join(dirname(__file__), '.env')
+load_dotenv(dotenv_path)
 
 # Define as configurações de conexão com o RabbitMQ
 rabbitmq_host = os.environ['RABBITMQ_HOST']
@@ -25,16 +33,40 @@ def callback(ch, method, properties, body):
     print("Received message:", body)
     print(properties.correlation_id)
     corr_id = properties.correlation_id
-    time.sleep(5)  # Espera 5 segundos
+
+
+    intention = classify_text(body.decode("utf-8"))
+    print(intention)
+
+    if intention == 'Criar uma imagem':
+        try:
+          dalle_msg = dalle_return(body.decode("utf-8"))
+          message_returned = dalle_msg
+        except:
+          message_returned = 'ERROR'
+
+
+    elif intention == 'Responder uma pergunta':
+        try:
+          prompt = (f"{body.decode('utf-8')}. Me responda apenas em português e de forma efetiva e direta")
+          gpt_msg = gpt_return(prompt)
+          message_returned = gpt_msg
+        except:
+          message_returned = 'ERROR'
     
+    data = {
+       "intention":intention,
+       "message_returned":message_returned
+    }
+
     # Publica a mensagem na fila de retorno
     channel.basic_publish(exchange='',
                           routing_key=rabbitmq_return_queue,
                             properties=pika.BasicProperties(correlation_id=corr_id),
 
-                          body=body)
+                          body=str(data))
     
-    print("Sent message to return queue:", body)
+    print("Sent message to return queue:", str(data))
 
 # Começa a consumir mensagens da fila
 channel.basic_consume(queue=rabbitmq_queue, on_message_callback=callback, auto_ack=True)
